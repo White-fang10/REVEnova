@@ -185,8 +185,10 @@ def _mock_strategies(context: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _candidate(name: str, key: str, prob: float, cost_tier: str, **extra: Any) -> Dict[str, Any]:
-    costs = {"low": 2.0, "medium": 12.0, "high": 150.0}
-    friction = {"low": 1.0, "medium": 6.0, "high": 25.0}
+    # High tier carries realistic operational + human cost: what looks best on
+    # raw probability is often the worst on expected value.
+    costs = {"low": 2.0, "medium": 12.0, "high": 25_000.0}
+    friction = {"low": 1.0, "medium": 6.0, "high": 20_000.0}
     out: Dict[str, Any] = {
         "name": name,
         "key": key,
