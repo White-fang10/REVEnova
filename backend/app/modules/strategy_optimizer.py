@@ -95,4 +95,6 @@ def select_best(candidates: List[Dict[str, Any]], revenue_at_risk: float) -> Sco
 def score_all(candidates: List[Dict[str, Any]], revenue_at_risk: float) -> List[ScoredStrategy]:
     if not candidates:
         return []
-    return [score_strategy(c, revenue_at_risk) for c in candidates]
+    scored = [score_strategy(c, revenue_at_risk) for c in candidates]
+    scored.sort(key=lambda s: s.expected_value, reverse=True)
+    return scored
