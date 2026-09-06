@@ -1,0 +1,1 @@
+from app.core.config import Settings, settings  # noqa: F401
