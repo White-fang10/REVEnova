@@ -149,9 +149,10 @@ def _mock_strategies(context: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     # Adjust for specific root causes.
     if "expired" in root_cause or "expired" in failure_reason:
-        # Alternate payment / payment-update performs best for expired cards.
-        alt = max(alt, 0.76)
-        immediate = min(immediate, 0.05)  # retrying an expired card is pointless
+        # Retrying an expired card is pointless; the payment-method update is
+        # the best-fit intervention for this scenario (README demo story).
+        immediate = min(immediate, 0.05)
+        delayed = min(delayed, 0.35)
     if "insufficient" in failure_reason:
         delayed = max(delayed, 0.62)  # funds usually appear within days
         immediate = min(immediate, 0.12)
@@ -323,8 +324,8 @@ class LLMService:
         return _mock_strategies(context)
 
     def _candidate(self, **kw: Any) -> Dict[str, Any]:
-        costs = {"low": 2.0, "medium": 12.0, "high": 150.0}
-        friction = {"low": 1.0, "medium": 6.0, "high": 25.0}
+        costs = {"low": 2.0, "medium": 12.0, "high": 25_000.0}
+        friction = {"low": 1.0, "medium": 6.0, "high": 20_000.0}
         tier = kw.get("cost_tier", "low")
         return {
             "name": kw.get("name", "Strategy"),

@@ -12,7 +12,7 @@ CANDIDATES = [
     {"key": "alternative_payment", "name": "Alternative Payment Method", "predicted_recovery": 0.62,
      "intervention_cost": 12.0, "friction_cost": 6.0, "cost_tier": "medium"},
     {"key": "human_escalation", "name": "Human Escalation", "predicted_recovery": 0.71,
-     "intervention_cost": 150.0, "friction_cost": 25.0, "cost_tier": "high"},
+     "intervention_cost": 25_000.0, "friction_cost": 20_000.0, "cost_tier": "high"},
 ]
 
 
