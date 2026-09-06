@@ -165,6 +165,14 @@ def evaluate_action(action: str, context: Dict[str, Any]) -> PolicyResult:
     contact_count = int(context.get("contacts_in_7d", context.get("contact_count", 0)))
     lifetime_value = float(context.get("lifetime_value", 0.0))
 
+    # Bookkeeping / book-keeping actions never touch money: always allowed.
+    if action in ("record_outcome", "close_case", "stop_recovery", "stop"):
+        ok_check = {"rule_id": "R00", "rule": "Bookkeeping action", "passed": True,
+                    "requires_human_approval": False, "message": ""}
+        checks.append(ok_check)
+        verdicts.checks = checks
+        return verdicts
+
     # Every monetary action checks the amount rule first.
     amount_check = check_amount_approval(amount)
     checks.append(amount_check)
@@ -187,10 +195,6 @@ def evaluate_action(action: str, context: Dict[str, Any]) -> PolicyResult:
     elif action in ("send_notification", "send_recovery_email", "send_reminder"):
         contact_check = check_contact_frequency(contact_count + 1)
         checks.append(contact_check)
-    elif action in ("stop_recovery", "close_case", "record_outcome"):
-        # Bookkeeping actions are always permitted.
-        ok_check = {"rule_id": "R00", "rule": "Bookkeeping action", "passed": True, "requires_human_approval": False, "message": ""}
-        checks.append(ok_check)
     else:
         # Unknown action: fail closed.
         ok_check = {
