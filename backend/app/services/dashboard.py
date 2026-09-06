@@ -25,22 +25,26 @@ def executive_summary(db: Session) -> Dict[str, Any]:
         RecoveryCase.status.in_(["open", "approved", "escalated"])
     ).all()
 
-    revenue_at_risk = sum(c.revenue_at_risk or 0.0 for c in open_cases)
-    predicted_recovery = sum((c.revenue_at_risk or 0.0) * (c.recovery_probability or 0.0) for c in active_cases)
+    # Historically at-risk revenue = revenue_at_risk across ALL cases.
+    all_cases = db.query(RecoveryCase).all()
+    total_at_risk_all = sum(c.revenue_at_risk or 0.0 for c in all_cases)
+
+    active_revenue_at_risk = sum(c.revenue_at_risk or 0.0 for c in active_cases)
+    predicted_recovery_active = sum(
+        (c.revenue_at_risk or 0.0) * (c.recovery_probability or 0.0) for c in active_cases
+    )
 
     total_recovered = (
         db.query(func.coalesce(func.sum(RecoveryOutcome.amount_recovered), 0.0)).scalar() or 0.0
     )
-    active_action_recovered = sum(
-        o.amount_recovered or 0.0
-        for o in db.query(RecoveryOutcome).all()
-        if o.case_id and db.get(RecoveryCase, o.case_id) and db.get(RecoveryCase, o.case_id).status == "recovered"
+    predicted_recovery_all = sum(
+        (c.revenue_at_risk or 0.0) * (c.recovery_probability or 0.0) for c in all_cases
     )
 
-    recovery_rate = (total_recovered / revenue_at_risk) if revenue_at_risk else 0.0
+    recovery_rate = (total_recovered / total_at_risk_all) if total_at_risk_all else 0.0
 
     case_counts = {
-        "total": db.query(RecoveryCase).count(),
+        "total": len(all_cases),
         "open": len(open_cases),
         "recovered": db.query(RecoveryCase).filter(RecoveryCase.status == "recovered").count(),
         "escalated": db.query(RecoveryCase).filter(RecoveryCase.status == "escalated").count(),
@@ -50,12 +54,15 @@ def executive_summary(db: Session) -> Dict[str, Any]:
 
     return {
         "currency": "INR",
-        "revenue_at_risk": round(revenue_at_risk, 2),
-        "predicted_recovery": round(predicted_recovery, 2),
-        "actual_recovery": round(total_recovered, 2),
-        "revenue_recovered_active": round(active_action_recovered, 2),
-        "recovery_rate": round(recovery_rate, 4),
+        # Active (what's currently at risk and actionable)
+        "active_revenue_at_risk": round(active_revenue_at_risk, 2),
+        "predicted_recovery_active": round(predicted_recovery_active, 2),
         "active_cases": len(active_cases),
+        # Lifetime roll-up (measured, most important metric = actual money back)
+        "revenue_at_risk": round(total_at_risk_all, 2),
+        "predicted_recovery": round(predicted_recovery_all, 2),
+        "actual_recovery": round(total_recovered, 2),
+        "recovery_rate": round(recovery_rate, 4),
         "case_counts": case_counts,
         "learned_strategy_count": db.query(RecoveryStrategy).filter(RecoveryStrategy.recommended.is_(True)).count(),
     }
