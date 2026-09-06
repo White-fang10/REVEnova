@@ -171,6 +171,33 @@ class AgentTools:
         }
 
     # ------------------------------------------------------------------
+    # Policy / scoring / message tools (bounded, audited)
+    # ------------------------------------------------------------------
+    def check_policy(self, action: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        from app.modules import policy_engine
+
+        result = policy_engine.evaluate_action(action, context)
+        self._trace("check_policy", {"action": action, "context": context},
+                    note=f"policy={result.status} rule={result.rule_id} {result.message[:120]}")
+        return result.to_dict()
+
+    def calculate_recovery_score(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        base = deterministic_recovery_probability(context)
+        self._trace("calculate_recovery_score", {"context": context})
+        return {"recovery_probability": round(base, 3),
+                "basis": "deterministic customer/failure-signal estimate; "
+                         "final EV decided by the deterministic optimizer"}
+
+    def generate_customer_message(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        from app.services.llm_service import llm
+
+        draft = llm.message(context)
+        self._trace("generate_customer_message",
+                    {"action": context.get("action", "")},
+                    note=f"drafted '{draft['subject']}'")
+        return draft
+
+    # ------------------------------------------------------------------
     # Execution primitives (BOUNDED - return what-would-happen)
     # ------------------------------------------------------------------
     def execute_retry(self, args: Dict[str, Any]) -> Dict[str, Any]:
