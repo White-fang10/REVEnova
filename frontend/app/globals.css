@@ -1,0 +1,215 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ink: #0d1117;
+  --gold: #f59e0b;
+}
+
+html,
+body {
+  background: #0d1117;
+  color: #e8e8e8;
+  font-family: "Inter", "Sora", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mono {
+  font-family: "Fira Code", "JetBrains Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Background ambient atmosphere */
+.hero-aura {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.hero-aura::before {
+  content: "";
+  position: absolute;
+  top: -40%;
+  left: 10%;
+  width: 80%;
+  height: 120%;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(245, 158, 11, 0.18) 0%,
+    rgba(245, 158, 11, 0) 60%
+  );
+  animation: pulseGlow 3.5s ease-in-out infinite;
+}
+.hero-aura::after {
+  content: "";
+  position: absolute;
+  top: -20%;
+  right: 5%;
+  width: 50%;
+  height: 90%;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(251, 191, 36, 0.12) 0%,
+    rgba(251, 191, 36, 0) 55%
+  );
+  animation: pulseGlow 4.2s ease-in-out infinite reverse;
+}
+
+@keyframes pulseGlow {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scale(1.06);
+  }
+}
+
+/* LIVE pulsing dot */
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: #f59e0b;
+  box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.6);
+  animation: livePing 1.6s cubic-bezier(0.66, 0, 0, 1) infinite;
+}
+@keyframes livePing {
+  0% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 9px rgba(245, 158, 11, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+  }
+}
+
+/* Card lift + gold glow on hover */
+.lift-card {
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+}
+.lift-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(245, 158, 11, 0.35);
+  box-shadow: 0 18px 40px -18px rgba(245, 158, 11, 0.45),
+    0 0 0 1px rgba(245, 158, 11, 0.12);
+}
+
+/* Button gold ripple/glow */
+.btn-gold {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #f59e0b, #fbbf24);
+  color: #0d1117;
+  font-weight: 600;
+}
+.btn-gold::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.6) 0%, transparent 60%);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.btn-gold:hover::after {
+  opacity: 1;
+}
+.btn-gold:active {
+  transform: translateY(1px);
+}
+
+.btn-ghost {
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+  transition: all 0.2s ease;
+}
+.btn-ghost:hover {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.6);
+  box-shadow: 0 0 16px -4px rgba(245, 158, 11, 0.5);
+}
+
+/* Skeleton loader (dark shimmer) */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    #12161d 25%,
+    #1a2029 50%,
+    #12161d 75%
+  );
+  background-size: 800px 100%;
+  animation: shimmer 1.6s linear infinite;
+  border-radius: 0.5rem;
+}
+@keyframes shimmer {
+  0% {
+    background-position: -800px 0;
+  }
+  100% {
+    background-position: 800px 0;
+  }
+}
+
+/* Ticker */
+.ticker-track {
+  display: inline-flex;
+  white-space: nowrap;
+  animation: ticker 38s linear infinite;
+}
+@keyframes ticker {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+/* Agent trace typing cursor */
+.typing-cursor::after {
+  content: "▍";
+  color: #f59e0b;
+  animation: blink 1s step-end infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Thin gold scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0b0f14;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a3240;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #f59e0b;
+}
+
+/* Tabular numbers in tables */
+table .mono,
+td .mono {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Subtle grid backdrop for hero */
+.bg-grid {
+  background-image: linear-gradient(rgba(245, 158, 11, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(245, 158, 11, 0.03) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
