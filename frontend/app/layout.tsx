@@ -1,6 +1,5 @@
-"use client";
-
 import "./globals.css";
+import AppShell from "@/components/AppShell";
 
 export default function RootLayout({
   children,
@@ -17,7 +16,9 @@ export default function RootLayout({
         />
         <title>REVEnova — Revenue Recovery Intelligence</title>
       </head>
-      <body>{children}</body>
+      <body>
+        <AppShell>{children}</AppShell>
+      </body>
     </html>
   );
 }
