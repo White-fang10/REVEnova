@@ -1,0 +1,24 @@
+fastapi>=0.135.0
+uvicorn[standard]>=0.41.0
+sqlalchemy>=2.0.49
+pydantic>=2.9.0
+pydantic-settings>=2.5.0
+python-multipart>=0.0.9
+
+# PostgreSQL / pgvector (optional - falls back to SQLite when unavailable)
+psycopg2-binary>=2.9.9
+pgvector>=0.3.0
+
+# Background jobs (optional - falls back to sync execution when unavailable)
+celery>=5.4.0
+redis>=5.0.0
+
+# Data / ML
+numpy>=1.26.0
+
+# LLM (optional - falls back to deterministic mock when no key set)
+openai>=1.40.0
+
+# Testing
+pytest>=8.0.0
+httpx>=0.27.0
