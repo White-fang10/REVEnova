@@ -24,6 +24,9 @@ logger = logging.getLogger("revenova.jobs")
 
 _celery: Any = None
 
+# Alias Celery looks for when started with `-A app.core.jobs worker`.
+celery = _celery
+
 # ---------------------------------------------------------------------------
 # Broker bootstrap (only when explicitly enabled)
 # ---------------------------------------------------------------------------
