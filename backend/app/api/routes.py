@@ -64,6 +64,14 @@ def run_case(case_id: int, execute: bool = True, db: Session = Depends(get_db)) 
     agent = RecoveryAgent(db)
     result = agent.run_case(case_id, execute=execute)
     db.commit()
+    # If we dispatched a payment link / payment-method update, schedule the next
+    # follow-up contact in the background (Celery if available, else inline).
+    if execute and result.get("best"):
+        best_key = result["best"].get("key", "")
+        if best_key in ("send_payment_link", "payment_method_update", "alternative_payment"):
+            from app.core.jobs import schedule_followup_task
+
+            schedule_followup_task.delay(case_id, 3)
     return result
 
 
