@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     # Celery/Redis are optional. When unavailable, jobs execute synchronously
     # so nothing is blocked. Set to true when a broker is present.
     use_celery: bool = False
+    redis_url: str = "redis://localhost:6379/0"
 
     # --- Policy constants (deterministic, never LLM-driven) ---
     human_approval_threshold: float = 100_000.0      # ₹ > this amount -> human approval

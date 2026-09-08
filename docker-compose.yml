@@ -1,0 +1,118 @@
+version: "3.9"
+
+services:
+  # --- PostgreSQL + pgvector ---
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: revenova-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: revenova
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # --- Redis ---
+  redis:
+    image: redis:7-alpine
+    container_name: revenova-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # --- Backend (FastAPI + Celery Worker) ---
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: revenova-backend
+    environment:
+      USE_POSTGRES: "true"
+      DATABASE_URL: "postgresql+psycopg2://postgres:postgres@postgres:5432/revenova"
+      USE_CELERY: "true"
+      REDIS_URL: "redis://redis:6379/0"
+      OPENAI_API_KEY: ""
+      OPENAI_MODEL: "gpt-4o-mini"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: >
+      sh -c "python -m scripts.seed &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  # --- Celery Worker ---
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: revenova-celery-worker
+    environment:
+      USE_POSTGRES: "true"
+      DATABASE_URL: "postgresql+psycopg2://postgres:postgres@postgres:5432/revenova"
+      USE_CELERY: "true"
+      REDIS_URL: "redis://redis:6379/0"
+      OPENAI_API_KEY: ""
+      OPENAI_MODEL: "gpt-4o-mini"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: celery -A app.core.jobs worker --loglevel=info --concurrency=2
+
+  # --- Celery Beat (periodic scheduler) ---
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: revenova-celery-beat
+    environment:
+      USE_POSTGRES: "true"
+      DATABASE_URL: "postgresql+psycopg2://postgres:postgres@postgres:5432/revenova"
+      USE_CELERY: "true"
+      REDIS_URL: "redis://redis:6379/0"
+      OPENAI_API_KEY: ""
+      OPENAI_MODEL: "gpt-4o-mini"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: celery -A app.core.jobs beat --loglevel=info
+
+  # --- Frontend (Next.js) ---
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: revenova-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: "http://backend:8000"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
