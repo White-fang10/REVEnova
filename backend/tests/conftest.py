@@ -8,14 +8,34 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app import models  # noqa: F401  ensure all models registered on Base
 from app.core.database import Base
 
 
+@pytest.fixture(autouse=True)
+def _reset_global_learning():
+    """The learning loop is a module-global singleton. Reset it before every
+    test so learned evidence from one test never bleeds into another."""
+    from app.services.learning_service import learning
+
+    learning._cache = {}
+    learning._counts = {}
+    learning._dirty = True
+    yield
+    learning._cache = {}
+    learning._counts = {}
+    learning._dirty = True
+
+
 @pytest.fixture()
 def db_session():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     session = Session()
@@ -79,15 +99,20 @@ def make_case(db, **kw):
 
 @pytest.fixture()
 def demo_data(db_session):
+    """Seed the demo scenario into the test database and return the rows."""
+    return make_demo_data(db_session)
+
+
+def make_demo_data(db):
     """A customer + failed expired-card transaction + open case (like the README
     demo scenario, in isolation)."""
-    cust = make_customer(db_session, segment="high_value", lifetime_value=850_000.0)
-    db_session.add(cust)
-    db_session.flush()
-    tx = make_transaction(db_session, customer_id=cust.id, transaction_rev="TXN_48291")
-    db_session.add(tx)
-    db_session.flush()
-    case = make_case(db_session, case_code="CASE_48291", transaction_id=tx.id, revenue_at_risk=8400.0)
-    db_session.add(case)
-    db_session.flush()
+    cust = make_customer(db, segment="high_value", lifetime_value=850_000.0)
+    db.add(cust)
+    db.flush()
+    tx = make_transaction(db, customer_id=cust.id, transaction_rev="TXN_48291")
+    db.add(tx)
+    db.flush()
+    case = make_case(db, case_code="CASE_48291", transaction_id=tx.id, revenue_at_risk=8400.0)
+    db.add(case)
+    db.flush()
     return {"customer": cust, "transaction": tx, "case": case}

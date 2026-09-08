@@ -29,7 +29,8 @@ class LearningService:
     """
 
     def __init__(self):
-        self._cache: Dict[str, Dict[str, float]] = {}
+        self._cache: Dict[str, float] = {}
+        self._counts: Dict[str, Dict[str, int]] = {}
         self._dirty = True
 
     def _invalidate(self) -> None:
@@ -103,17 +104,19 @@ class LearningService:
     def load(self, db: Session) -> None:
         snap = self.snapshot(db)
         self._cache = {}
+        self._counts = {}
         for s in snap:
             self._cache[s["strategy"]] = s["recovery_rate"]
+            self._counts[s["strategy"]] = {"n": s["attempts"], "ok": s["successes"]}
         self._dirty = False
 
     def record(self, strategy_key: str, success: bool) -> None:
         """Called AFTER an outcome row is committed — updates in-memory cache
         so subsequent runs reflect the new evidence."""
-        cur = self._cache.get(strategy_key, {"n": 0, "ok": 0})
-        cur["n"] += 1
-        cur["ok"] += 1 if success else 0
-        self._cache[strategy_key] = cur["ok"] / cur["n"] if cur["n"] else 0.0
+        counts = self._counts.setdefault(strategy_key, {"n": 0, "ok": 0})
+        counts["n"] += 1
+        counts["ok"] += 1 if success else 0
+        self._cache[strategy_key] = counts["ok"] / counts["n"] if counts["n"] else 0.0
         self._dirty = True
 
     @property

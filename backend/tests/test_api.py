@@ -8,51 +8,77 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
-from app import models
 from app.core.database import Base, get_db
 from app.main import create_app
 
-from conftest import make_case, make_customer, make_transaction
-
-# Default limit used by routes
-CASE_COUNT = 5
+from tests.conftest import make_case, make_customer, make_transaction
 
 
 @pytest.fixture()
-def client():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+def _env():
+    """Holds the isolated in-memory engine/session used by the TestClient."""
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-    test_db = Session()
 
+    class Env:
+        def __init__(self):
+            self.session = Session()
+            self.engine = engine
+
+        def commit(self):
+            self.session.commit()
+
+    env = Env()
+    yield env
+    env.session.close()
+    Base.metadata.drop_all(engine)
+    engine.dispose()
+
+
+@pytest.fixture()
+def client(_env):
     def _override():
         try:
-            yield test_db
+            yield _env.session
         finally:
-            test_db.close()
+            pass
 
     app = create_app()
     app.dependency_overrides[get_db] = _override
-
     with TestClient(app) as c:
         yield c
-        test_db.close()
-        Base.metadata.drop_all(engine)
-        engine.dispose()
 
 
-def _seed_basic_data(db):
-    cust = make_customer(db)
-    db.add(cust)
-    db.flush()
-    tx = make_transaction(db, customer_id=cust.id, transaction_rev="TXN_1")
-    db.add(tx)
-    db.flush()
-    case = make_case(db, transaction_id=tx.id, case_code="CASE_1001")
-    db.add(case)
-    db.commit()
-    return cust, tx, case
+@pytest.fixture()
+def client_with_case(_env):
+    """A client with one seeded customer + failed tx + open case."""
+    cust = make_customer(_env.session)
+    _env.session.add(cust)
+    _env.session.flush()
+    tx = make_transaction(_env.session, customer_id=cust.id, transaction_rev="TXN_1")
+    _env.session.add(tx)
+    _env.session.flush()
+    case = make_case(_env.session, transaction_id=tx.id, case_code="CASE_1001")
+    _env.session.add(case)
+    _env.commit()
+
+    def _override():
+        try:
+            yield _env.session
+        finally:
+            pass
+
+    app = create_app()
+    app.dependency_overrides[get_db] = _override
+    with TestClient(app) as c:
+        yield c, case.id, tx.id
 
 
 def test_health(client):
@@ -68,34 +94,18 @@ def test_dashboard_summary_empty_db(client):
     assert r.status_code == 200
     body = r.json()
     assert body["currency"] == "INR"
-    assert body["revenue_at_risk"] >= 0
-    assert body["recovery_rate"] >= 0
+    assert body["revenue_at_risk"] == 0
+    assert body["recovery_rate"] == 0
+    assert body["active_cases"] == 0
 
 
-def test_dashboard_summary_with_case(client):
-    _seed_basic_data(client.app.dependency_overrides[get_db].__closure__[0].cell_contents if False else _peek_session(client))
+def test_dashboard_summary_with_case(client_with_case):
+    client, case_id, _ = client_with_case
     r = client.get("/api/dashboard/summary")
     assert r.status_code == 200
-    assert r.json()["active_cases"] >= 1
-
-
-def _peek_session(client):
-    # The override closure holds the test session; grab it to seed rows.
-    from app.core.database import get_db as dep
-
-    override = client.app.dependency_overrides.get(dep)
-    # Fall back: seed through a fresh session bound to the same engine is not
-    # possible from here, so we require the caller to seed via the client.* approach.
-    raise RuntimeError("use client_seeded fixture")
-
-
-@pytest.fixture()
-def client_seeded(client):
-    g = client.app.dependency_overrides.get(get_db)
-    # Re-open a session against the same in-memory engine (TestClient uses one).
-    # Simpler: seed through an endpoint isn't ideal, so we seed with a manual
-    # engine mirror. We use the app's own storage path again here.
-    return client
+    body = r.json()
+    assert body["active_cases"] >= 1
+    assert body["revenue_at_risk"] > 0
 
 
 def test_leaks_endpoint_empty(client):
@@ -105,10 +115,70 @@ def test_leaks_endpoint_empty(client):
     assert "detected" in body and "breakdown" in body
 
 
-def test_cases_list(client):
+def test_cases_list(client_with_case):
+    client, case_id, _ = client_with_case
     r = client.get("/api/cases")
     assert r.status_code == 200
-    assert isinstance(r.json(), list)
+    rows = r.json()
+    assert isinstance(rows, list)
+    assert any(row["id"] == case_id for row in rows)
+
+
+def test_case_detail(client_with_case):
+    client, case_id, _ = client_with_case
+    r = client.get(f"/api/cases/{case_id}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["case_code"] == "CASE_1001"
+    assert "trace" in body
+
+
+def test_run_case_no_execute(client_with_case):
+    client, case_id, _ = client_with_case
+    r = client.post(f"/api/cases/{case_id}/run?execute=false")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["best"] is not None
+    assert len(body["strategies"]) >= 3
+    assert len(body["trace"]) > 0
+
+
+def test_approve_case(client_with_case):
+    client, case_id, _ = client_with_case
+    r = client.post(f"/api/cases/{case_id}/approve")
+    assert r.status_code == 200
+    assert r.json()["approved"] is True
+
+
+def test_escalate_case(client_with_case):
+    client, case_id, _ = client_with_case
+    r = client.post(f"/api/cases/{case_id}/escalate")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["escalated"] is True
+    assert body["case"]["status"] == "escalated"
+
+
+def test_case_strategies(client_with_case):
+    client, case_id, _ = client_with_case
+    r = client.post(f"/api/cases/{case_id}/run?execute=false")  # generates strategies
+    assert r.status_code == 200
+    r2 = client.get(f"/api/cases/{case_id}/strategies")
+    assert r2.status_code == 200
+    body = r2.json()
+    assert body["equation"]["formula"].startswith("Expected Value")
+    assert len(body["strategies"]) >= 3
+    assert "best" in body
+
+
+def test_audit_endpoint(client_with_case):
+    client, case_id, _ = client_with_case
+    client.post(f"/api/cases/{case_id}/run?execute=false")
+    r = client.get("/api/audit")
+    assert r.status_code == 200
+    rows = r.json()
+    assert isinstance(rows, list)
+    assert len(rows) >= 1
 
 
 def test_ingest_failed_creates_case(client):
@@ -165,3 +235,16 @@ def test_learning_endpoint(client):
 def test_strategies_endpoint_case_not_found(client):
     r = client.get("/api/cases/424242/strategies")
     assert r.status_code == 404
+
+
+def test_schedule_followup(client_with_case):
+    client, case_id, _ = client_with_case
+    r = client.post(f"/api/cases/{case_id}/schedule-followup?in_days=2")
+    assert r.status_code == 200
+    assert r.json()["scheduled"] is True
+
+
+def test_scan_leaks_endpoint(client):
+    r = client.post("/api/maintenance/scan-leaks")
+    assert r.status_code == 200
+    assert "status" in r.json() or "dispatched" in r.json()

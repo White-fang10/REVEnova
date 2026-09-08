@@ -24,9 +24,6 @@ logger = logging.getLogger("revenova.jobs")
 
 _celery: Any = None
 
-# Alias Celery looks for when started with `-A app.core.jobs worker`.
-celery = _celery
-
 # ---------------------------------------------------------------------------
 # Broker bootstrap (only when explicitly enabled)
 # ---------------------------------------------------------------------------
@@ -50,6 +47,9 @@ try:
         }
 except Exception:  # pragma: no cover - depends on environment
     _celery = None
+
+# Alias Celery looks for when started with `-A app.core.jobs worker`.
+celery = _celery
 
 
 # ---------------------------------------------------------------------------
@@ -153,24 +153,6 @@ def process_leaks() -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Registration + sync fallback shims
 # ---------------------------------------------------------------------------
-_registered: Dict[Callable, Any] = {}
-
-
-def _register(fn: Callable, task_name: str) -> Any:
-    """Return a Celery Task when a broker exists, else the plain function."""
-    if _celery is not None:
-        task = _celery.task(fn, name=task_name)
-        _registered[fn] = task
-        return task
-    return fn
-
-
-run_case_async_task = _register(run_case_async, "revenova.run_case_async")
-schedule_retry_task = _register(schedule_retry, "revenova.schedule_retry")
-schedule_followup_task = _register(schedule_followup, "revenova.schedule_followup")
-process_leaks_task = _register(process_leaks, "revenova.process_leaks")
-
-
 class SyncExecutor:
     """Drop-in facade: when no broker is available, runs tasks inline."""
 
@@ -182,6 +164,25 @@ class SyncExecutor:
 
     def apply_async(self, args=None, kwargs=None, **_) -> Any:
         return self.fn(*(args or []), **(kwargs or {}))
+
+
+_registered: Dict[Callable, Any] = {}
+
+
+def _register(fn: Callable, task_name: str) -> Any:
+    """Return a Celery Task when a broker exists, else a SyncExecutor wrapper so
+    call sites can uniformly use ``<task>.delay(...)``."""
+    if _celery is not None:
+        task = _celery.task(fn, name=task_name)
+        _registered[fn] = task
+        return task
+    return SyncExecutor(fn)
+
+
+run_case_async_task = _register(run_case_async, "revenova.run_case_async")
+schedule_retry_task = _register(schedule_retry, "revenova.schedule_retry")
+schedule_followup_task = _register(schedule_followup, "revenova.schedule_followup")
+process_leaks_task = _register(process_leaks, "revenova.process_leaks")
 
 
 def task(bound_func: Callable) -> Callable:

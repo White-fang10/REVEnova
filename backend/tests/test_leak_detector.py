@@ -9,7 +9,10 @@ from datetime import datetime, timedelta
 from app.modules import leak_detector
 from app.models import Transaction
 
-from conftest import make_transaction
+from tests.conftest import make_transaction
+
+
+_tx_seq = [0]
 
 
 def _bulk_fail(db, n, *, status="failed", reason="timeout", method="UPI",
@@ -17,9 +20,10 @@ def _bulk_fail(db, n, *, status="failed", reason="timeout", method="UPI",
     """Insert n transactions in the recent window with a specific failure."""
     now = datetime.utcnow()
     for i in range(n):
+        _tx_seq[0] += 1
         t = make_transaction(
             db,
-            transaction_rev=f"TXN_BULK_{i}",
+            transaction_rev=f"TXN_BULK_{_tx_seq[0]}",
             customer_id=1,
             amount=1000.0,
             payment_method=method,
@@ -31,18 +35,21 @@ def _bulk_fail(db, n, *, status="failed", reason="timeout", method="UPI",
     db.flush()
 
 
-def _bulk_baseline(db, n, *, method="UPI"):
-    """Insert n succeeded transactions in the baseline window (>2 days ago)."""
+def _bulk_baseline(db, n, *, method="UPI", n_fail=0, fail_reason="declined_generic"):
+    """Insert n transactions in the baseline window (>2 days ago) so the cohort
+    has a non-zero historical failure rate (needed for a meaningful z-score)."""
     now = datetime.utcnow()
     for i in range(n):
+        _tx_seq[0] += 1
+        is_fail = i < n_fail
         t = make_transaction(
             db,
-            transaction_rev=f"TXN_BASE_{i}",
+            transaction_rev=f"TXN_BASE_{_tx_seq[0]}",
             customer_id=1,
             amount=1000.0,
             payment_method=method,
-            status="succeeded",
-            failure_reason="",
+            status="failed" if is_fail else "succeeded",
+            failure_reason=fail_reason if is_fail else "",
             timestamp=now - timedelta(days=10, hours=i % 8),
         )
         db.add(t)
@@ -65,18 +72,17 @@ def test_no_leak_when_below_minimum_transactions(db_session):
 
 def test_no_leak_when_failure_rate_not_above_baseline(db_session):
     """A healthy cohort (low failure rate) must not be flagged."""
-    _bulk_baseline(db_session, 200, method="UPI")
+    _bulk_baseline(db_session, 200, method="UPI", n_fail=15)
     _bulk_fail(db_session, 20, status="succeeded", reason="timeout", method="UPI")
     leaks = leak_detector.detect_leaks(db_session)
-    # All succeeded transactions carry an empty failure_reason, so the
-    # timed-out cohort simply doesn't exist -> no leak.
-    assert all(l["dimension"] == "payment_method" for l in leaks) or leaks == []
+    # The recent window is all successful transactions -> no leak fires.
+    assert leaks == []
 
 
 def test_detects_channel_degradation_cohort(db_session):
     """A statistically significant timeout burst must be detected as a leak:
     the payment-method cohort (UPI) shows a rate far above baseline."""
-    _bulk_baseline(db_session, 300, method="UPI")
+    _bulk_baseline(db_session, 300, method="UPI", n_fail=15)
     _bulk_fail(db_session, 60, status="failed", reason="timeout", method="UPI")
     leaks = leak_detector.detect_leaks(db_session)
     assert leaks, "expected at least one detected leak"
@@ -90,10 +96,12 @@ def test_detects_channel_degradation_cohort(db_session):
 
 def test_leak_sorted_by_revenue_at_risk(db_session):
     """Leaks come back sorted by revenue at risk descending."""
-    _bulk_baseline(db_session, 300, method="UPI")
+    _bulk_baseline(db_session, 300, method="UPI", n_fail=15)
+    _bulk_baseline(db_session, 300, method="netbanking", n_fail=10)
     _bulk_fail(db_session, 40, reason="timeout", method="UPI")
-    _bulk_fail(db_session, 40, reason="gateway_error", method="netbanking")
+    _bulk_fail(db_session, 20, reason="gateway_error", method="netbanking")
     leaks = leak_detector.detect_leaks(db_session)
+    assert leaks, "expected leaks but found none"
     risks = [l["revenue_at_risk"] for l in leaks]
     assert risks == sorted(risks, reverse=True)
 
@@ -101,13 +109,13 @@ def test_leak_sorted_by_revenue_at_risk(db_session):
 def test_zscore_respects_custom_threshold(db_session):
     """With an absurdly high z-threshold nothing is flagged; with a low one the
     leak appears (threshold controls sensitivity)."""
-    _bulk_baseline(db_session, 300, method="UPI")
+    _bulk_baseline(db_session, 300, method="UPI", n_fail=15)
     _bulk_fail(db_session, 60, reason="timeout", method="UPI")
 
     none = leak_detector.detect_leaks(db_session, z_threshold=99.0)
     assert none == []
 
-    some = leak_detector.detect_leaks(db_session, z_threshold=0.1)
+    some = leak_detector.detect_leaks(db_session, z_threshold=0.5)
     assert any(l["value"] == "UPI" for l in some)
 
 
@@ -131,7 +139,7 @@ def test_leak_type_bucketing():
 
 
 def test_detect_is_deterministic(db_session):
-    _bulk_baseline(db_session, 300, method="UPI")
+    _bulk_baseline(db_session, 300, method="UPI", n_fail=15)
     _bulk_fail(db_session, 60, reason="timeout", method="UPI")
     a = leak_detector.detect_leaks(db_session)
     b = leak_detector.detect_leaks(db_session)
