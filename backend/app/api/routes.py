@@ -68,11 +68,57 @@ def run_case(case_id: int, execute: bool = True, db: Session = Depends(get_db)) 
     # follow-up contact in the background (Celery if available, else inline).
     if execute and result.get("best"):
         best_key = result["best"].get("key", "")
-        if best_key in ("send_payment_link", "payment_method_update", "alternative_payment"):
+        if best_key in ("payment_method_update", "alternative_payment"):
             from app.core.jobs import schedule_followup_task
 
             schedule_followup_task.delay(case_id, 3)
     return result
+
+
+@router.post("/cases/{case_id}/run-async")
+def run_case_async_endpoint(case_id: int, execute: bool = True, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Dispatch the agent loop to the background worker (Celery) when available,
+    otherwise runs it inline. Returns a job receipt."""
+    case = db.get(RecoveryCase, case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="case not found")
+    from app.core.jobs import run_case_async_task
+
+    receipt = run_case_async_task.delay(case_id, execute)
+    return {"dispatched": True, "mode": "celery" if receipt is not None and hasattr(receipt, "id") else "sync",
+            "case_id": case_id}
+
+
+@router.post("/cases/{case_id}/schedule-followup")
+def schedule_followup_endpoint(case_id: int, in_days: int = 3, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    case = db.get(RecoveryCase, case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="case not found")
+    from app.core.jobs import schedule_followup_task
+
+    schedule_followup_task.delay(case_id, in_days)
+    return {"scheduled": True, "case_id": case_id, "in_days": in_days}
+
+
+@router.post("/cases/{case_id}/retry")
+def schedule_retry_endpoint(case_id: int, delay_minutes: int = 180, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    case = db.get(RecoveryCase, case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="case not found")
+    from app.core.jobs import schedule_retry_task
+
+    schedule_retry_task.delay(case_id, delay_minutes)
+    return {"scheduled": True, "case_id": case_id, "delay_minutes": delay_minutes}
+
+
+@router.post("/maintenance/scan-leaks")
+def scan_leaks_endpoint(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Manually trigger a leak scan (also runs hourly via Celery Beat)."""
+    from app.core.jobs import process_leaks_task
+
+    result = process_leaks_task.delay()
+    db.close()
+    return result if isinstance(result, dict) else {"dispatched": True}
 
 
 @router.post("/cases/{case_id}/approve")
